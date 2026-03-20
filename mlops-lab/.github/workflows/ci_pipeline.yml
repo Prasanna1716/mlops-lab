@@ -1,1 +1,111 @@
-PASTE YOUR YAML CODE HERE
+# Name of the workflow (this will appear in GitHub Actions UI)
+name: ML Training CI Pipeline
+
+# This section defines when the workflow should run
+on:
+  push:  # triggers when code is pushed to repo
+    # Run pipeline only when these folders change
+    paths:
+      - 'src/**'       # any changes in source code
+      - 'configs/**'   # changes in configuration files
+      - 'data/**'      # changes in dataset files
+
+  # Schedule section for automatic execution
+  schedule:
+    - cron: '0 2 * * *'  # runs every day at 2:00 AM UTC
+
+  workflow_dispatch:  # allows manual trigger from GitHub UI
+
+# Environment variables used across jobs
+env:
+  PYTHON_VERSION: '3.10'  # Python version to use
+  MODEL_VERSION: ${{ github.sha }}  # unique version based on commit ID
+
+# Jobs define the steps in pipeline
+jobs:
+
+  train:  # first job: training the model
+    name: Train Model  # display name
+    runs-on: ubuntu-latest  # GitHub runner environment
+
+    steps:
+      - uses: actions/checkout@v4  
+        # pulls latest code from repository
+
+      - uses: actions/setup-python@v5  
+        # sets up Python environment
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}  # uses defined Python version
+          cache: 'pip'  # caches installed packages for faster runs
+
+      - name: Install dependencies  
+        # installs required libraries
+        run: |
+          pip install -r requirements.txt
+
+      - name: Run training  
+        # executes training script
+        run: |
+          python train.py
+        env:
+          MODEL_VERSION: ${{ env.MODEL_VERSION }}  # passes model version to script
+
+      - name: Upload model artifact  
+        # saves trained model file for later jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: model-${{ github.sha }}  # artifact name includes commit ID
+          path: model.pkl  # file to upload
+          retention-days: 30  # keep artifact for 30 days
+
+
+  validate:  # second job: validate the model
+    name: Validate Model
+    runs-on: ubuntu-latest
+
+    needs: [train]  
+    # ensures this job runs only after training is completed
+
+    steps:
+      - uses: actions/checkout@v4  
+        # checkout code again
+
+      - uses: actions/setup-python@v5  
+        # setup Python again
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - run: pip install -r requirements.txt  
+        # install dependencies again
+
+      - uses: actions/download-artifact@v4  
+        # download model saved from previous job
+        with:
+          name: model-${{ github.sha }}
+
+      - name: Run validation gates  
+        # run validation script
+        run: |
+          python validate.py
+
+
+  register:  # third job: register model (like moving to staging)
+    name: Register Model
+    runs-on: ubuntu-latest
+
+    needs: [validate]  
+    # runs only after validation job is successful
+
+    if: github.ref == 'refs/heads/main'  
+    # executes only when code is pushed to main branch
+
+    steps:
+      - uses: actions/checkout@v4  
+        # checkout repository
+
+      - run: pip install -r requirements.txt  
+        # install dependencies
+
+      - run: python -c "print('Registered: iris_classifier @ Staging')"  
+        # simulate model registration step
